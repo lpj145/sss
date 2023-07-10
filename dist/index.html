@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Batch processings</title>
+</head>
+<body>
+<div id="app"></div>
+</body>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import Vue from 'https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.esm.browser.min.js'
+
+  const AnalyticsGenerator = Vue.component('analytics-generator', {
+    data: () => ({
+      start: null,
+      end: null,
+      sample: '',
+      activeInterval: false,
+      intervalSeconds: 1,
+      timeoutId: 0,
+      results: {},
+    }),
+    methods: {
+      intervalDispatch() {
+        if (!this.activeInterval || !this.sample) {
+          clearTimeout(this.timeoutId)
+          return
+        }
+
+        this.timeoutId = setTimeout(() => {
+          this.intervalDispatch()
+        }, this.intervalSeconds * 1000)
+
+        const jobs = ['all', 'balance', 'top_day', 'top_counterparty']
+        const job = jobs[(Math.floor(Math.random() * jobs.length))]
+        this.fetchGeneratedData()
+          .then(() => {
+            return this.dispatchJob(job)
+          })
+      },
+      dispatchJob(jobName) {
+        if (!this.sample || !jobName) {
+          return Promise.resolve()
+        }
+
+        return fetch(`/analyze?job=${jobName}`, {
+          body: this.sample,
+          method: 'post',
+          headers: {'content-type': 'application/json'}
+        })
+      },
+      fetchGeneratedData() {
+        if (!this.start || !this.end) {
+          return Promise.resolve()
+        }
+
+        return fetch(`/generate-bills?from=${this.start}&to=${this.end}`)
+          .then((r) => r.text())
+          .then((data) => {
+            this.sample = data
+          })
+      },
+      fetchJobResults() {
+        fetch('/results')
+          .then(r => r.json())
+          .then(data => {
+            this.results = {
+              ...this.results,
+              ...data,
+            }
+          })
+
+        setTimeout(() => {
+          this.fetchJobResults()
+        }, 1500)
+      }
+    },
+    watch: {
+      activeInterval() {
+        this.intervalDispatch()
+      }
+    },
+    mounted() {
+      this.fetchJobResults()
+    },
+    template: `
+        <div class="flex flex-col gap-6">
+          <div class="flex gap-x-6">
+            <input v-model="start" title="from date" type="date" class="p-2 border rounded border-slate-200" placeholder="From date" />
+            <input v-model="end" type="date" class="p-2 border rounded border-slate-200" placeholder="To date" title="to date" />
+            <app-btn @click="fetchGeneratedData">Generate</app-btn>
+          </div>
+          <label class="flex flex-col">
+            Sample Data
+            <textarea class="border rounded border-slate-200">{{ sample }}</textarea>
+          </label>
+          <div>
+            <h3>Dispatch jobs</h3>
+            <app-btn @click="dispatchJob('all')">all</app-btn>
+            <app-btn @click="dispatchJob('balance')">balance</app-btn>
+            <app-btn @click="dispatchJob('top_counterparty')">top_counterparty</app-btn>
+            <app-btn @click="dispatchJob('top_day')">top_day</app-btn>
+            <input step="0.1" v-model="intervalSeconds" type="number" class="p-2 border rounded border-slate-200" placeholder="interval seconds" title="Interval request in seconds" />
+            <app-btn @click="(activeInterval = !activeInterval)">{{ activeInterval ? 'Stop' : 'Start' }}</app-btn>
+          </div>
+          <div class="flex flex-col gap-y-6">
+            <div v-for="(data, key) in results" :key="key" class="p-4 rounded bg-slate-100">
+              <span class="block">{{ key }}</span>
+              <span class="block">results:</span>
+              <code>{{ data }}</code>
+            </div>
+          </div>
+        </div>`
+  })
+
+  const AppAnalytics = Vue.component('app-analytics', {
+    components: {
+      AnalyticsGenerator,
+    },
+    template: `<div class="flex flex-col"><h1>Analytics</h1> <analytics-generator /></div>`
+  })
+
+  const AppMetrics = Vue.component('app-metrics', {
+    data: () => ({
+      metrics: {}
+    }),
+    methods: {
+      fetchMetrics() {
+        fetch('/metrics', { cache: 'no-cache' })
+          .then(r => r.json())
+          .then(metrics => {
+            this.metrics = metrics
+          })
+
+        setTimeout(() => {
+          this.fetchMetrics()
+        }, 1200)
+      }
+    },
+    mounted() {
+      this.fetchMetrics()
+    },
+    template: `
+      <div class="flex flex-col gap-6">
+        <h1>Metrics</h1>
+        <div class="bg-slate-200 p-4" v-for="(details, key) in metrics" :key="key">
+          <span class="block">{{ details.name }}</span>
+          <span class="block">results:</span>
+          <code>{{ details }}</code>
+        </div>
+      </div>
+    `
+  })
+
+  const AppBtn = Vue.component('app-btn', {
+    template: `<button v-bind="$attrs" v-on="$listeners" class="px-3 py-2 bg-slate-200 rounded"><slot /></button>`
+  })
+
+  const App = Vue.component('App', {
+    components: {
+      AppAnalytics,
+      AppMetrics,
+    },
+    data: () => ({
+      view: 'app-analytics'
+    }),
+    template: `
+      <div class="flex flex-col gap-6 p-4">
+        <app-navigator @navigate="(view = $event)" />
+        <div class="p-4">
+          <app-analytics v-show="view === 'app-analytics'" />
+          <app-metrics v-show="view === 'app-metrics'" />
+        </div>
+      </div>`
+  })
+
+  const AppNavigator = Vue.component('app-navigator', {
+    template: `<div class="flex gap-x-6"><app-btn @click="$emit('navigate', 'app-analytics')">Analytics</app-btn><app-btn @click="$emit('navigate', 'app-metrics')">Metrics</app-btn></div>`
+  })
+
+  new Vue({
+    components: {
+      AppNavigator,
+      AppBtn,
+    },
+    render: h => h(App)
+  }).$mount('#app')
+</script>
+</html>
